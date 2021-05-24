@@ -102,9 +102,17 @@ fn spawn_snake(
         ),
     ];
 }
+
+#[derive(Default)]
+struct LastPlayerInput(Option<Direction>);
+
 // snake_movement_input system
-fn snake_movement_input(keyboard_input: Res<Input<KeyCode>>, mut heads: Query<&mut SnakeHead>) {
-    if let Some(mut head) = heads.iter_mut().next() {
+fn snake_movement_input(
+    keyboard_input: Res<Input<KeyCode>>,
+    mut last_input: ResMut<LastPlayerInput>,
+    mut heads: Query<&SnakeHead>,
+) {
+    if let Some(head) = heads.iter_mut().next() {
         let dir: Direction = if keyboard_input.pressed(KeyCode::Left) {
             Direction::Left
         } else if keyboard_input.pressed(KeyCode::Down) {
@@ -117,7 +125,7 @@ fn snake_movement_input(keyboard_input: Res<Input<KeyCode>>, mut heads: Query<&m
             head.direction
         };
         if dir != head.direction.opposite() {
-            head.direction = dir;
+            last_input.0 = Some(dir)
         }
     }
 }
@@ -127,10 +135,15 @@ fn snake_movement(
     segments: ResMut<SnakeSegments>,
     mut last_tail_position: ResMut<LastTailPosition>,
     mut game_over_writer: EventWriter<GameOverEvent>,
-    mut heads: Query<(Entity, &SnakeHead)>,
+    last_input: Res<LastPlayerInput>,
+    mut heads: Query<(Entity, &mut SnakeHead)>,
     mut positions: Query<&mut Position>,
 ) {
-    if let Some((head_entity, head)) = heads.iter_mut().next() {
+    if let Some((head_entity, mut head)) = heads.iter_mut().next() {
+        match last_input.0 {
+            Some(dir) => head.direction = dir,
+            None => {}
+        }
         let segment_positions = segments
             .0
             .iter()
@@ -255,17 +268,28 @@ impl Direction {
 struct Food;
 
 // food spawner system
-fn food_spawner(mut commands: Commands, materials: Res<Materials>) {
+fn food_spawner(
+    mut commands: Commands,
+    entity_positions: Query<(Entity, &Position)>,
+    materials: Res<Materials>,
+) {
+    let pos = Position {
+        x: (random::<f32>() * ARENA_WIDTH as f32) as i32,
+        y: (random::<f32>() * ARENA_HEIGHT as f32) as i32,
+    };
+    for entity_pos in entity_positions.iter() {
+        if entity_pos.1 == &pos {
+            return;
+        }
+    }
+
     commands
         .spawn_bundle(SpriteBundle {
             material: materials.food_material.clone(),
             ..Default::default()
         })
         .insert(Food)
-        .insert(Position {
-            x: (random::<f32>() * ARENA_WIDTH as f32) as i32,
-            y: (random::<f32>() * ARENA_HEIGHT as f32) as i32,
-        })
+        .insert(pos)
         .insert(Size::square(0.8));
 }
 
@@ -311,6 +335,7 @@ fn main() {
         .insert_resource(ClearColor(Color::rgb(0.04, 0.04, 0.04)))
         .insert_resource(SnakeSegments::default())
         .insert_resource(LastTailPosition::default())
+        .insert_resource(LastPlayerInput::default())
         .add_plugins(DefaultPlugins)
         .add_event::<GrowthEvent>()
         .add_event::<GameOverEvent>()
